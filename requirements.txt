@@ -1,0 +1,35 @@
+# 网格量化回测框架依赖
+
+# 核心依赖
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+scipy>=1.10.0
+akshare>=1.10.0          # 金融数据接口库
+
+# 可选依赖
+backtrader>=1.9.78.123  # 专业回测框架
+TA-Lib>=0.4.26          # 技术分析指标库
+plotly>=5.15.0          # 交互式可视化
+pyecharts>=2.0.0        # 基于ECharts的图表库
+joblib>=1.2.0           # 并行计算（加速回测）
+
+# 开发依赖
+pytest>=7.0.0           # 测试框架
+black>=23.0.0           # 代码格式化
+flake8>=6.0.0           # 代码检查
+mypy>=1.0.0             # 类型检查
+
+# Web服务依赖
+fastapi>=0.100.0         # 现代Python Web框架
+uvicorn[standard]>=0.20.0 # ASGI服务器
+
+# 数据库依赖
+sqlalchemy>=2.0.0        # Python SQL工具包和ORM
+aiosqlite>=0.19.0        # 异步SQLite支持
+
+# 安装说明
+# 核心依赖安装：pip install -r requirements.txt
+# 完整依赖安装：pip install -r requirements.txt
+# TA-Lib可能需要单独安装，具体请参考官方文档

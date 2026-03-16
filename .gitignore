@@ -1,0 +1,36 @@
+# 虚拟环境
+.venv/
+
+# 数据文件
+data/*.db
+data/*.csv
+data/*.xls
+
+# 日志文件
+*.log
+
+# 临时文件
+__pycache__/
+*.pyc
+
+# IDE 相关
+.vscode/
+.idea/
+
+# 前端依赖
+web/frontend/node_modules/
+web/frontend/dist/
+
+# 构建文件
+build/
+dist/
+
+# 环境变量文件
+.env
+
+# 测试文件
+tests/
+
+# 缓存文件
+.cache/
+.trae/
