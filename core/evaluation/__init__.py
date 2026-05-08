@@ -10,10 +10,13 @@ Evaluation module for backtesting performance analysis
 
 from .report_generator import ReportGenerator
 from .bias_checker import BiasChecker
+from .markdown_report import render_backtest_report_markdown, write_backtest_report_markdown
 
 __all__ = [
     'ReportGenerator',
     'BiasChecker',
+    'render_backtest_report_markdown',
+    'write_backtest_report_markdown',
 ]
 
 __version__ = '1.0.0'

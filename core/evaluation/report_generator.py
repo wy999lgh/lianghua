@@ -131,6 +131,12 @@ class ReportGenerator:
             report['avg_profit'] = self._calculate_avg_profit(trade_records)
             report['avg_win'] = self._calculate_avg_win(trade_records)
             report['avg_loss'] = self._calculate_avg_loss(trade_records)
+            avg_win = float(report.get("avg_win", 0.0) or 0.0)
+            avg_loss = float(report.get("avg_loss", 0.0) or 0.0)
+            if avg_loss < 0:
+                report["profit_loss_ratio"] = float(avg_win / abs(avg_loss)) if abs(avg_loss) > 0 else float("inf")
+            else:
+                report["profit_loss_ratio"] = float("inf") if avg_win > 0 else 0.0
             report['max_consecutive_wins'] = self._calculate_max_consecutive(
                 trade_records, True)
             report['max_consecutive_losses'] = self._calculate_max_consecutive(
@@ -157,6 +163,8 @@ class ReportGenerator:
                     aligned[0], aligned[1])
                 report['benchmark_return'] = self._calculate_total_return(
                     aligned[1])
+                report['benchmark_volatility'] = self._calculate_volatility(
+                    aligned[1])
                 report['excess_return'] = report['total_return'] - \
                     report['benchmark_return']
 
@@ -170,6 +178,20 @@ class ReportGenerator:
         # 月度收益
         report['monthly_returns'] = self._calculate_monthly_returns(
             portfolio_returns)
+        
+        # 滚动收益（1个月、3个月、6个月、12个月）
+        rolling_df = self._calculate_rolling_returns(portfolio_returns)
+        if not rolling_df.empty:
+            rolling_data = []
+            for idx, row in rolling_df.iterrows():
+                rolling_data.append({
+                    'date': idx.strftime('%Y-%m'),
+                    '1_month': row.get('window_30d'),
+                    '3_month': row.get('window_90d'),
+                    '6_month': row.get('window_180d'),
+                    '12_month': row.get('window_365d')
+                })
+            report['rolling_returns'] = rolling_data
 
         # 偏差检查
         if include_bias_check:
@@ -517,6 +539,32 @@ class ReportGenerator:
         )
 
         return {str(k): float(v) for k, v in monthly.items()}
+
+    def _calculate_rolling_returns(self, returns: pd.Series, windows: List[int] = None) -> pd.DataFrame:
+        """
+        计算滚动收益率
+
+        Args:
+            returns: 日收益率序列
+            windows: 滚动窗口大小列表（天数），默认[30, 90, 180, 365]
+
+        Returns:
+            pd.DataFrame: 包含各窗口滚动收益率的DataFrame
+        """
+        if len(returns) == 0:
+            return pd.DataFrame()
+
+        if windows is None:
+            windows = [30, 90, 180, 365]
+
+        result = pd.DataFrame(index=returns.index)
+        
+        for window in windows:
+            result[f'window_{window}d'] = (1 + returns).rolling(window=window).apply(
+                lambda x: x.prod() - 1, raw=True
+            )
+        
+        return result
 
     def _extract_profits(self, trade_records: List[Dict]) -> List[float]:
         """

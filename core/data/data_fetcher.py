@@ -60,13 +60,8 @@ class DataFetcher:
         self.retry_count = retry_count
         self.retry_delay = retry_delay
         self.cleaner = DataCleaner()
-
-        # 获取数据库路径
-        if db_path is None:
-            config = get_database_config()
-            db_path = config.get_stock_data_db_path()
-
-        self.storage = Database(stock_db_path=db_path)
+        self.db_path = db_path
+        self.storage = Database()
 
     # ==================== 原始数据获取 (来自 Fetcher) ====================
 

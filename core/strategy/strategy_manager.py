@@ -11,7 +11,7 @@ import inspect
 from typing import Dict, List, Type, Optional, Any
 from datetime import datetime
 
-from core.strategy_module.base_strategy import BaseStrategy
+from core.strategy.base_strategy import BaseStrategy
 
 
 class StrategyManager:
@@ -60,7 +60,7 @@ class StrategyManager:
                     module_name = filename[:-3]
 
                     # 构建模块路径
-                    module_path = f"core.strategy_module.strategies.{module_name}"
+                    module_path = f"core.strategy.strategies.{module_name}"
 
                     # 动态导入模块
                     module = importlib.import_module(module_path)
@@ -72,10 +72,10 @@ class StrategyManager:
                                 obj != BaseStrategy):
                             # 注册策略
                             self.register_strategy(obj)
-                            print(f"✓ 自动注册策略: {name}")
+                            print(f"[OK] 自动注册策略: {name}")
 
                 except Exception as e:
-                    print(f"✗ 加载策略文件 {filename} 失败: {e}")
+                    print(f"[FAIL] 加载策略文件 {filename} 失败: {e}")
 
     def register_strategy(self, strategy_class: Type[BaseStrategy]) -> None:
         """
@@ -89,7 +89,7 @@ class StrategyManager:
         strategy_name = temp_instance.name
 
         self.strategies[strategy_name] = strategy_class
-        print(f"✓ 策略已注册: {strategy_name}")
+        print(f"[OK] 策略已注册: {strategy_name}")
 
     def create_strategy(self, strategy_name: str,
                         config: Optional[Dict[str, Any]] = None) -> BaseStrategy:
@@ -151,12 +151,16 @@ class StrategyManager:
 
         strategy_class = self.strategies[strategy_name]
         temp_instance = strategy_class(name=strategy_name)
+        
+        # 获取参数描述（如果策略类定义了的话）
+        param_descriptions = getattr(strategy_class, 'PARAM_DESCRIPTIONS', {})
 
         return {
             'name': temp_instance.name,
             'description': temp_instance.description,
             'version': temp_instance.version,
-            'config': temp_instance.get_config()
+            'config': temp_instance.get_config(),
+            'param_descriptions': param_descriptions
         }
 
     def compare_strategies(self, strategy_names: List[str],
@@ -175,7 +179,7 @@ class StrategyManager:
         返回：
         Dict[str, Any] - 对比结果
         """
-        from core.backtest_module.backtest_engine import BacktestEngine
+        from core.backtest.backtester import BacktestEngine
 
         results = {}
         engine = BacktestEngine()

@@ -4,8 +4,8 @@
 Backtest module for the grid trading system
 """
 
-from core.backtest_module.backtester import BacktestEngine, GridBacktraderStrategy
-from core.backtest_module.metrics import BacktestMetrics
+from core.backtest.backtester import BacktestEngine, GridBacktraderStrategy
+from core.backtest.metrics import BacktestMetrics
 
 __all__ = [
     'BacktestEngine',

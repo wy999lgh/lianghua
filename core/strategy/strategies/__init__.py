@@ -4,3 +4,9 @@
 自定义策略目录
 将自定义策略文件放在此目录下，StrategyManager 会自动加载
 """
+
+from .trend_resonance_regime_strategy import TrendResonanceRegimeStrategy
+
+__all__ = [
+    "TrendResonanceRegimeStrategy",
+]

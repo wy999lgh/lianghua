@@ -1,29 +1,45 @@
-# 虚拟环境
-.venv/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
 
-# 数据文件
-data/*.db
-data/*.csv
-data/*.xls
-
-# 日志文件
+# 日志
+logs/
 *.log
 
-# 临时文件
-__pycache__/
-*.pyc
+# 数据库（可选，数据文件可能需要保留）
+# data/*.db
 
-# IDE 相关
+# IDE
 .vscode/
 .idea/
+
+# 虚拟环境
+venv/
+.venv/
+
+# 数据文件（保留策略数据目录）
+data/*.db
+!data/000/
+!data/300/
+!data/600/
+!data/688/
+!data/B/
+!data/SH/
+!data/etf/
+!data/zs/
+data/*.csv
+data/*.xls
 
 # 前端依赖
 web/frontend/node_modules/
 web/frontend/dist/
-
-# 构建文件
-build/
-dist/
+frontend/node_modules/
+frontend/dist/
+.vite/
 
 # 环境变量文件
 .env
@@ -34,3 +50,8 @@ tests/
 # 缓存文件
 .cache/
 .trae/
+.qoder/
+
+# 数据库数据和报告
+mongodb_data/
+reports/

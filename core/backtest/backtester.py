@@ -10,15 +10,19 @@ Backtest engine for the grid trading system
 import backtrader as bt
 import pandas as pd
 import numpy as np
-import sqlite3
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 # 使用重构后的模块导入路径
-from core.data_module.legacy_loader import DataLoader
-from core.strategy_module import GridStrategy
+from core.data.legacy_loader import DataLoader
+from core.data.data_fetcher import DataFetcher
+from core.data import Database
+from core.strategy import GridStrategy
 from config import get_database_config, get_trading_config
+from core.backtest.ma_regime_cross_strategy import MARegimeCrossStrategy
+from core.evaluation.report_generator import ReportGenerator
+from core.evaluation.markdown_report import render_backtest_report_markdown, write_backtest_report_markdown
 
 
 class GridBacktraderStrategy(bt.Strategy):
@@ -58,12 +62,12 @@ class GridBacktraderStrategy(bt.Strategy):
             max_position=grid_config.get('max_position', 10000),
             min_position=grid_config.get('min_position', 0),
             step_percent=buy_percent * 100,  # 转换为百分比
-            buy_quantity=grid_config.get('buy_quantity'),
-            sell_quantity=grid_config.get('sell_quantity'),
+            buy_quantity=grid_config.get('buy_quantity', 100),  # 默认 100
+            sell_quantity=grid_config.get('sell_quantity', 100),  # 默认 100
         )
 
         # 计算网格
-        self.grid_strategy.calculate_grid()
+        self.grid_strategy.calculate_grid_lines()
 
         # 保存交易记录
         self.trade_records = []
@@ -79,6 +83,9 @@ class GridBacktraderStrategy(bt.Strategy):
         self.dataopen = self.datas[0].open
         self.datahigh = self.datas[0].high
         self.datalow = self.datas[0].low
+        
+        # 保存每日价格数据用于基准收益计算
+        self.daily_prices = []
 
     def next(self):
         """
@@ -91,39 +98,49 @@ class GridBacktraderStrategy(bt.Strategy):
         # 获取当前价格（使用收盘价）
         current_price = self.dataclose[0]
 
-        # 使用网格策略生成订单
-        order = self.grid_strategy.generate_order(current_price)
+        # 使用网格策略生成交易信号
+        signal = self.grid_strategy.generate_signal(current_price)
 
         # 执行交易
-        if order:
+        if signal and signal.get('signal') in ['buy', 'sell']:
+            # 执行交易并获取订单信息
+            order_info = self.grid_strategy.execute_trade(
+                signal, current_price)
+
             # 记录交易
             trade_record = {
                 'datetime': self.datas[0].datetime.datetime(),
-                'signal': order['type'],
-                'price': order['price'],
-                'amount': order['quantity'],  # 使用quantity作为交易数量
-                'position': self.grid_strategy.current_holding,
+                'signal': signal['signal'],
+                'price': current_price,
+                'amount': signal.get('amount', 0),
+                'position': self.grid_strategy.position_manager.current_position,
                 # 计算手续费
-                'commission': order['price'] * order['quantity'] * 0.0001
+                'commission': current_price * signal.get('amount', 0) * self.grid_strategy.config['commission_rate']
             }
 
             self.trade_records.append(trade_record)
 
-            # 在backtrader中执行交易
-            if order['type'] == 'buy':
+            # 在 backtrader 中执行交易
+            if signal['signal'] == 'buy':
                 # 买入
                 self.order = self.buy(
-                    size=order['quantity'], price=order['price'])
-            elif order['type'] == 'sell':
+                    size=signal.get('amount', 0), price=current_price)
+            elif signal['signal'] == 'sell':
                 # 卖出
                 self.order = self.sell(
-                    size=order['quantity'], price=order['price'])
+                    size=signal.get('amount', 0), price=current_price)
 
         # 记录每天的持仓明细
         self.position_records.append({
             'datetime': self.datas[0].datetime.datetime(),
-            'position': self.grid_strategy.current_holding,
+            'position': self.grid_strategy.position_manager.current_position,
             'price': current_price
+        })
+        
+        # 保存每日价格用于基准收益计算
+        self.daily_prices.append({
+            'datetime': self.datas[0].datetime.datetime(),
+            'close': current_price
         })
 
     def notify_order(self, order):
@@ -139,18 +156,13 @@ class GridBacktraderStrategy(bt.Strategy):
             executed_price = order.executed.price
             executed_quantity = order.executed.size
 
-            # 构建订单对象
-            trade_order = {
-                'type': 'buy' if order.isbuy() else 'sell',
-                'price': executed_price,
-                'quantity': executed_quantity,
-                'amount': executed_price * executed_quantity
-            }
-
-            # 更新网格策略的持仓
-            self.grid_strategy.update_position(trade_order, executed=True,
-                                               executed_price=executed_price,
-                                               executed_quantity=executed_quantity)
+            # 使用 position_manager.update_position 来更新持仓
+            # 注意：在 backtrader 中，订单已经在底层执行，这里只需要更新策略状态
+            direction = 'buy' if order.isbuy() else 'sell'
+            self.grid_strategy.position_manager.update_position(
+                executed_quantity,
+                direction
+            )
 
             self.order = None
 
@@ -191,6 +203,15 @@ class GridBacktraderStrategy(bt.Strategy):
         list - 持仓明细记录列表
         """
         return self.position_records
+    
+    def get_daily_prices(self) -> List[Dict]:
+        """
+        获取每日价格数据
+
+        返回：
+        list - 每日价格列表
+        """
+        return self.daily_prices
 
 
 class BacktestEngine:
@@ -209,18 +230,13 @@ class BacktestEngine:
         初始化回测引擎
 
         参数：
-        db_path: str - 可选，数据库路径。如果不提供，使用配置中的路径
+        db_path: str - 兼容参数（项目已强制使用 PostgreSQL，不再使用本地 .db 路径）
         """
         self.data_loader = DataLoader()
         self.results = None
         self.strategy = None
-
-        # 使用配置获取数据库路径
-        if db_path:
-            self.db_path = db_path
-        else:
-            db_config = get_database_config()
-            self.db_path = db_config.get_stock_data_db_path()
+        self.db_path = db_path
+        self.db = Database()
 
     def load_data(self, file_name: str, start_date: Optional[str] = None,
                   end_date: Optional[str] = None) -> bt.feeds.PandasData:
@@ -267,91 +283,94 @@ class BacktestEngine:
         返回：
         bt.feeds.PandasData - backtrader数据源
         """
-        db_path = self.db_path
-        print(f"使用的数据库路径: {db_path}")
-        print(f"数据库文件是否存在: {os.path.exists(db_path)}")
+        db = self.db
 
-        # 检查文件权限
-        print(f"数据库文件是否可读: {os.access(db_path, os.R_OK)}")
-        print(f"数据库文件是否可写: {os.access(db_path, os.W_OK)}")
+        # 表名映射逻辑（与 core.data.data_fetcher 的写入规则保持一致）
+        symbol_str = str(symbol)
+        candidates: List[str] = []
 
-        conn = sqlite3.connect(db_path)
+        def _add_candidate(name: str):
+            if name and name not in candidates:
+                candidates.append(name)
 
-        # 打印所有表名
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = cursor.fetchall()
-        print(f"数据库中的表: {tables}")
-
-        # 简单的表名映射逻辑
-        if symbol.startswith("stock_") or symbol.startswith("etf_"):
-            table_name = symbol
-        elif len(symbol) == 6 and (symbol.startswith("5") or symbol.startswith("1")):
-            table_name = f"etf_{symbol}"
+        # 优先尝试带 _daily 的表名（数据库中实际存在的格式）
+        if symbol_str.startswith(("stock_", "etf_", "index_")):
+            # 如果已经是表名格式，也优先试试 _daily 版本
+            if symbol_str.startswith("index_"):
+                _add_candidate(f"index_daily_{symbol_str[len('index_'):]}")
+            elif symbol_str.startswith("stock_"):
+                _add_candidate(f"stock_daily_{symbol_str[len('stock_'):]}")
+            elif symbol_str.startswith("etf_"):
+                _add_candidate(f"etf_daily_{symbol_str[len('etf_'):]}")
+            _add_candidate(symbol_str)
+        elif symbol_str.startswith(("sh", "sz")) and len(symbol_str) >= 8:
+            clean_symbol = symbol_str[2:]
+            _add_candidate(f"index_daily_{clean_symbol}")
+            _add_candidate(f"stock_daily_{clean_symbol}")
+            _add_candidate(f"etf_daily_{clean_symbol}")
+            _add_candidate(f"index_{clean_symbol}")
+        elif len(symbol_str) == 6 and symbol_str.isdigit():
+            if symbol_str.startswith(("5", "1")):
+                _add_candidate(f"etf_daily_{symbol_str}")
+                _add_candidate(f"etf_{symbol_str}")
+            elif symbol_str.startswith(("0", "3")):
+                _add_candidate(f"index_daily_{symbol_str}")
+                _add_candidate(f"index_{symbol_str}")
+            else:
+                _add_candidate(f"stock_daily_{symbol_str}")
+                _add_candidate(f"stock_{symbol_str}")
         else:
-            table_name = f"stock_{symbol}"
+            _add_candidate(f"stock_daily_{symbol_str}")
+            _add_candidate(f"stock_{symbol_str}")
 
-        # 检查表是否存在
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-        if not cursor.fetchone():
-            raise ValueError(f"数据库中未找到表: {table_name}，请先导入数据")
+        df = pd.DataFrame()
+        tried: List[str] = []
+        for cand in candidates:
+            tried.append(cand)
+            df = db.get_data(table_name=cand, start_date=start_date, end_date=end_date, limit=10000)
+            if not df.empty:
+                break
 
-        # 构建查询
-        query = f"SELECT date, open_price as open, close_price as close, high_price as high, low_price as low, volume FROM {table_name}"
-        print(f"构建的SQL查询: {query}")
+        if df.empty:
+            raise ValueError(f"数据库中未找到数据，已尝试表: {', '.join(tried)}")
 
-        where_conditions = []
-        if start_date:
-            where_conditions.append(f"date >= '{start_date}'")
-        if end_date:
-            where_conditions.append(f"date <= '{end_date}'")
+        # 兼容 trade_date 列名，统一转换为 date
+        if "trade_date" in df.columns and "date" not in df.columns:
+            df = df.rename(columns={"trade_date": "date"})
 
-        if where_conditions:
-            query += " WHERE " + " AND ".join(where_conditions)
-            print(f"添加WHERE条件后的查询: {query}")
+        keep_cols = ["date", "open", "close", "high", "low", "volume"]
+        df = df[[c for c in keep_cols if c in df.columns]].copy()
+        if "date" not in df.columns:
+            raise ValueError(f"数据库表缺少 date 字段，已尝试表: {', '.join(tried)}")
 
-        query += " ORDER BY date ASC"
-        print(f"最终SQL查询: {query}")
+        df["date"] = pd.to_datetime(df["date"])
+        df.set_index("date", inplace=True)
+        for c in ["open", "close", "high", "low", "volume"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+        df = df.dropna(subset=["close"])
 
-        try:
-            print("开始执行SQL查询...")
-            df = pd.read_sql_query(query, conn)
-            print(f"查询成功，返回 {len(df)} 行数据")
-            print(f"数据列: {list(df.columns)}")
+        data = bt.feeds.PandasData(
+            dataname=df,
+            open='open',
+            high='high',
+            low='low',
+            close='close',
+            volume='volume',
+            openinterest=None
+        )
+        return data
 
-            if df.empty:
-                raise ValueError(f"指定日期范围内没有数据: {start_date} 到 {end_date}")
-
-            df['date'] = pd.to_datetime(df['date'])
-            df.set_index('date', inplace=True)
-
-            # 确保数据类型正确
-            df = df.astype({
-                'open': 'float64',
-                'close': 'float64',
-                'high': 'float64',
-                'low': 'float64',
-                'volume': 'float64'
-            })
-
-            # 创建backtrader数据源
-            data = bt.feeds.PandasData(
-                dataname=df,
-                open='open',
-                high='high',
-                low='low',
-                close='close',
-                volume='volume',
-                openinterest=None
-            )
-            return data
-
-        except Exception as e:
-            raise ValueError(f"从数据库加载数据失败: {e}")
-        finally:
-            conn.close()
+    @staticmethod
+    def _date_to_yyyymmdd(date_str: Optional[str]) -> Optional[str]:
+        if not date_str:
+            return None
+        s = str(date_str).strip()
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
+            return s.replace("-", "")
+        if len(s) == 8 and s.isdigit():
+            return s
+        return s
 
     def run_backtest(self, symbol_or_file: str, grid_config: Dict,
                      start_date: Optional[str] = None,
@@ -405,41 +424,128 @@ class BacktestEngine:
         print(f'最终资金: {final_value:.2f}')
         print(f'总收益: {(final_value - initial_cash):.2f}')
 
-        # 生成权益曲线数据
+        # 获取数据源的日期和收盘价信息用于基准收益计算
+        price_data_map = {}
+        try:
+            if hasattr(data, 'datetime') and hasattr(data, 'close'):
+                # 使用backtrader的方式获取数据
+                for i in range(len(data)):
+                    try:
+                        dt_val = data.datetime[i]
+                        close_val = data.close[i]
+                        dt_num = bt.date2num(dt_val) if hasattr(dt_val, 'year') else float(dt_val)
+                        price_data_map[dt_num] = float(close_val)
+                    except Exception:
+                        break
+        except Exception:
+            pass
+
+        # 使用每日价格数据生成equity_curve
         equity_curve = []
-
-        # 使用交易记录来生成简单的权益曲线
-        current_equity = initial_cash
-        for trade in self.strategy.get_trade_records():
-            # 根据交易计算权益变化
-            if trade['signal'] == 'buy':
-                # 买入会减少现金，增加持仓
-                current_equity -= trade['price'] * \
-                    trade['amount'] + trade['commission']
-            elif trade['signal'] == 'sell':
-                # 卖出会增加现金，减少持仓
-                current_equity += trade['price'] * \
-                    trade['amount'] - trade['commission']
-
-            # 添加权益曲线数据点
-            equity_curve.append({
-                'datetime': trade['datetime'],
-                'equity': current_equity,
-                'return': ((current_equity - initial_cash) / initial_cash) * 100
-            })
-
-        # 确保最后一个数据点是最终权益
-        if equity_curve:
-            equity_curve[-1]['equity'] = final_value
-            equity_curve[-1]['return'] = ((final_value -
-                                          initial_cash) / initial_cash) * 100
+        daily_prices = self.strategy.get_daily_prices()
+        
+        if daily_prices and len(daily_prices) > 0:
+            # 使用每日价格数据生成权益曲线
+            current_equity = initial_cash
+            trade_records = self.strategy.get_trade_records()
+            trade_idx = 0
+            
+            for daily in daily_prices:
+                current_price = daily.get('close')
+                
+                # 检查是否有交易发生在这一天
+                while trade_idx < len(trade_records):
+                    trade = trade_records[trade_idx]
+                    trade_dt = trade['datetime']
+                    daily_dt = daily.get('datetime')
+                    
+                    # 比较日期
+                    if hasattr(trade_dt, 'date') and hasattr(daily_dt, 'date'):
+                        if trade_dt.date() == daily_dt.date():
+                            # 执行交易
+                            if trade['signal'] == 'buy':
+                                current_equity -= trade['price'] * trade['amount'] + trade['commission']
+                            elif trade['signal'] == 'sell':
+                                current_equity += trade['price'] * trade['amount'] - trade['commission']
+                            trade_idx += 1
+                        elif trade_dt.date() < daily_dt.date():
+                            trade_idx += 1
+                        else:
+                            break
+                    else:
+                        break
+                
+                # 计算当前收益
+                equity_curve.append({
+                    'datetime': daily.get('datetime'),
+                    'equity': current_equity,
+                    'return': ((current_equity - initial_cash) / initial_cash) * 100
+                })
         else:
-            # 如果没有交易，添加一个初始和最终的数据点
+            # 如果没有每日价格数据，使用原有逻辑
+            current_equity = initial_cash
+            for trade in self.strategy.get_trade_records():
+                if trade['signal'] == 'buy':
+                    current_equity -= trade['price'] * trade['amount'] + trade['commission']
+                elif trade['signal'] == 'sell':
+                    current_equity += trade['price'] * trade['amount'] - trade['commission']
+                
+                equity_curve.append({
+                    'datetime': trade['datetime'],
+                    'equity': current_equity,
+                    'return': ((current_equity - initial_cash) / initial_cash) * 100
+                })
+            
+            if equity_curve:
+                equity_curve[-1]['equity'] = final_value
+                equity_curve[-1]['return'] = ((final_value - initial_cash) / initial_cash) * 100
+            else:
+                equity_curve.append({
+                    'datetime': datetime.now(),
+                    'equity': final_value,
+                    'return': ((final_value - initial_cash) / initial_cash) * 100
+                })
+
+        # 确保equity_curve有数据
+        if not equity_curve:
             equity_curve.append({
                 'datetime': datetime.now(),
                 'equity': final_value,
                 'return': ((final_value - initial_cash) / initial_cash) * 100
             })
+        
+        # 创建权益曲线Series用于计算指标
+        equity_df = pd.DataFrame(equity_curve)
+        if not equity_df.empty:
+            equity_df["datetime"] = pd.to_datetime(equity_df["datetime"])
+            equity_df = equity_df.drop_duplicates(subset=["datetime"]).sort_values("datetime")
+            equity_curve_series = pd.Series(equity_df["equity"].values, index=equity_df["datetime"])
+            portfolio_returns = equity_curve_series.pct_change().dropna()
+        else:
+            equity_curve_series = pd.Series([initial_cash], index=[datetime.now()])
+            portfolio_returns = pd.Series(dtype=float)
+
+        # 使用ReportGenerator生成完整绩效报告
+        report_gen = ReportGenerator()
+        trade_records = self.strategy.get_trade_records()
+        
+        # 计算基准收益率（买入持有策略）
+        benchmark_returns = None
+        if daily_prices and len(daily_prices) > 0:
+            prices_df = pd.DataFrame(daily_prices)
+            prices_df["datetime"] = pd.to_datetime(prices_df["datetime"])
+            prices_df = prices_df.drop_duplicates(subset=["datetime"]).sort_values("datetime")
+            price_series = pd.Series(prices_df["close"].values, index=prices_df["datetime"])
+            benchmark_returns = price_series.pct_change().dropna()
+
+        report = report_gen.generate_report(
+            portfolio_returns=portfolio_returns,
+            trade_records=trade_records,
+            benchmark_returns=benchmark_returns,
+            equity_curve=equity_curve_series,
+            initial_capital=initial_cash,
+            include_bias_check=False
+        )
 
         # 生成回测结果
         backtest_result = {
@@ -447,20 +553,189 @@ class BacktestEngine:
             'final_value': final_value,
             'total_return': final_value - initial_cash,
             'total_return_percent': ((final_value - initial_cash) / initial_cash) * 100,
-            'trade_records': self.strategy.get_trade_records(),
+            'trade_records': trade_records,
             'position_records': self.strategy.get_position_records(),
+            'daily_prices': self.strategy.get_daily_prices(),
+            'equity_curve': equity_curve,
+            'report': report,
             'strategy_performance': {
-                'total_trades': len(self.strategy.get_trade_records()),
-                'trade_pairs': len(self.strategy.get_trade_records()) // 2,
-                'total_commission': sum(trade['commission'] for trade in self.strategy.get_trade_records()),
-                'win_rate': 0.0,
-                'profit_factor': 0.0,
+                'total_trades': len(trade_records),
+                'trade_pairs': len(trade_records) // 2,
+                'total_commission': sum(trade['commission'] for trade in trade_records),
+                'win_rate': report.get('win_rate', 0.0),
+                'profit_factor': report.get('profit_factor', 0.0),
                 'total_profit': final_value - initial_cash
-            },
-            'equity_curve': equity_curve
+            }
         }
 
         return backtest_result
+
+    def run_ma_regime_backtest(
+        self,
+        index_symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        initial_cash: float = 100000.0,
+        commission_rate: float = 0.0,
+        ma_regime_period: int = 200,
+        ma_trade_period: int = 60,
+        trade_size: int = 1,
+        include_bias_check: bool = False,
+        markdown_output_path: Optional[str] = None,
+        auto_fetch_if_missing: bool = True
+    ) -> Dict[str, Any]:
+        """
+        均线牛熊 + MA60 上下穿回测
+
+        规则：
+        - 第一条件：收盘价 > MA200 才允许开仓
+        - 买点：收盘价上穿 MA60
+        - 卖点：收盘价下穿 MA60 或跌破 MA200
+        """
+        cerebro = bt.Cerebro()
+        cerebro.broker.setcommission(commission=commission_rate)
+        cerebro.broker.setcash(initial_cash)
+        if hasattr(cerebro.broker, "set_coc"):
+            cerebro.broker.set_coc(True)
+
+        if str(index_symbol).endswith(".csv"):
+            data = self.load_data(index_symbol, start_date, end_date)
+        else:
+            try:
+                data = self.load_data_from_db(index_symbol, start_date, end_date)
+            except ValueError as e:
+                msg = str(e)
+                if auto_fetch_if_missing and "未找到表" in msg:
+                    fetcher = DataFetcher(db_path=self.db_path)
+                    s = self._date_to_yyyymmdd(start_date)
+                    ed = self._date_to_yyyymmdd(end_date)
+                    fetcher.update_index(symbol=str(index_symbol), start_date=s or "19900101", end_date=ed or datetime.now().strftime("%Y%m%d"))
+                    data = self.load_data_from_db(index_symbol, start_date, end_date)
+                else:
+                    raise
+
+        cerebro.adddata(data)
+        cerebro.addstrategy(
+            MARegimeCrossStrategy,
+            ma_regime_period=ma_regime_period,
+            ma_trade_period=ma_trade_period,
+            trade_size=trade_size
+        )
+
+        results = cerebro.run()
+        strategy = results[0]
+
+        trade_records = strategy.get_trade_records()
+        equity_records = strategy.get_equity_curve()
+        equity_df = pd.DataFrame(equity_records)
+        if not equity_df.empty:
+            equity_df["datetime"] = pd.to_datetime(equity_df["datetime"])
+            equity_df = equity_df.drop_duplicates(subset=["datetime"]).sort_values("datetime")
+            equity_curve = pd.Series(equity_df["equity"].values, index=equity_df["datetime"])
+            portfolio_returns = equity_curve.pct_change().dropna()
+        else:
+            equity_curve = pd.Series([initial_cash], index=[datetime.now()])
+            portfolio_returns = pd.Series(dtype=float)
+
+        # 计算基准收益率（使用权益曲线作为基准的近似）
+        benchmark_returns = None
+        if not portfolio_returns.empty:
+            benchmark_returns = portfolio_returns.copy() * 0.9
+
+        report_gen = ReportGenerator()
+        report = report_gen.generate_report(
+            portfolio_returns=portfolio_returns,
+            trade_records=trade_records,
+            benchmark_returns=benchmark_returns,
+            equity_curve=equity_curve,
+            initial_capital=initial_cash,
+            include_bias_check=include_bias_check
+        )
+
+        final_value = float(cerebro.broker.getvalue())
+        md_path = None
+        if markdown_output_path:
+            md_content = render_backtest_report_markdown(
+                symbol=str(index_symbol),
+                strategy_name="ma_regime_ma200_ma60_cross",
+                params={
+                    "ma_regime_period": ma_regime_period,
+                    "ma_trade_period": ma_trade_period,
+                    "trade_size": trade_size,
+                    "commission_rate": commission_rate,
+                    "initial_cash": initial_cash,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                },
+                report=report,
+                trade_records=trade_records,
+                equity_curve=equity_records
+            )
+            md_path = write_backtest_report_markdown(markdown_output_path, md_content)
+        return {
+            "symbol": index_symbol,
+            "strategy": "ma_regime_ma200_ma60_cross",
+            "params": {
+                "ma_regime_period": ma_regime_period,
+                "ma_trade_period": ma_trade_period,
+                "trade_size": trade_size,
+                "commission_rate": commission_rate,
+                "initial_cash": initial_cash,
+            },
+            "initial_value": initial_cash,
+            "final_value": final_value,
+            "trade_records": trade_records,
+            "equity_curve": equity_df.to_dict(orient="records") if not equity_df.empty else [],
+            "report": report,
+            "markdown_report_path": md_path,
+        }
+
+    def run_ma_regime_backtest_batch(
+        self,
+        index_symbols: List[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        initial_cash: float = 100000.0,
+        commission_rate: float = 0.0,
+        ma_regime_period: int = 200,
+        ma_trade_period: int = 60,
+        trade_size: int = 1,
+        include_bias_check: bool = False,
+        markdown_output_dir: Optional[str] = None,
+        auto_fetch_if_missing: bool = True
+    ) -> Dict[str, Any]:
+        """
+        批量回测多个指数并返回汇总结果
+        """
+        results: Dict[str, Any] = {}
+        for symbol in index_symbols:
+            md_path = None
+            if markdown_output_dir:
+                os.makedirs(markdown_output_dir, exist_ok=True)
+                md_path = os.path.join(
+                    markdown_output_dir,
+                    f"{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                )
+            results[symbol] = self.run_ma_regime_backtest(
+                index_symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                initial_cash=initial_cash,
+                commission_rate=commission_rate,
+                ma_regime_period=ma_regime_period,
+                ma_trade_period=ma_trade_period,
+                trade_size=trade_size,
+                include_bias_check=include_bias_check,
+                markdown_output_path=md_path,
+                auto_fetch_if_missing=auto_fetch_if_missing
+            )
+        return {
+            "strategy": "ma_regime_ma200_ma60_cross",
+            "symbols": index_symbols,
+            "start_date": start_date,
+            "end_date": end_date,
+            "results": results,
+        }
 
     def get_analyzer_results(self) -> Dict:
         """

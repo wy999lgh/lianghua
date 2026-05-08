@@ -4,7 +4,7 @@
 Core module for the grid trading system
 """
 
-from .data_module import (
+from .data import (
     DataFetcher,
     DataCleaner,
     Database,

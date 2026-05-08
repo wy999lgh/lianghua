@@ -10,7 +10,7 @@
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Callable
 
-from core.strategy_module.position_manager import PositionManager, BasePriceManager
+from core.strategy.position_manager import PositionManager, BasePriceManager
 
 
 class GridStrategy:

@@ -165,3 +165,179 @@ class FactorLibrary:
             result[f'MA{period}'] = data.rolling(window=period).mean()
 
         return result
+
+    @staticmethod
+    def cmo(data: pd.Series, period: int = 20) -> pd.Series:
+        """
+        Chande Momentum Oscillator (CMO)
+
+        CMO = (Sum(Up) - Sum(Down)) / (Sum(Up) + Sum(Down)) * 100
+
+        Args:
+            data: 价格序列（通常为收盘价）
+            period: 计算周期，默认 20
+
+        Returns:
+            pd.Series: CMO 序列，范围约为 [-100, 100]
+        """
+        diff = data.diff()
+        up = diff.clip(lower=0)
+        down = (-diff).clip(lower=0)
+        sum_up = up.rolling(window=period).sum()
+        sum_down = down.rolling(window=period).sum()
+        denominator = sum_up + sum_down
+        cmo = (sum_up - sum_down) / denominator.replace(0, np.nan) * 100
+        return cmo.fillna(0.0)
+
+    @staticmethod
+    def bollinger_bands_ema(
+        data: pd.Series,
+        period: int = 20,
+        std_mult: float = 2.0
+    ) -> pd.DataFrame:
+        """
+        基于 EMA 中轨的布林带
+
+        Args:
+            data: 价格序列（通常为收盘价）
+            period: 中轨 EMA 周期，默认 20
+            std_mult: 标准差倍数，默认 2.0
+
+        Returns:
+            pd.DataFrame: 包含以下列
+                - bb_mid: EMA 中轨
+                - bb_upper: 上轨
+                - bb_lower: 下轨
+                - bb_width: 带宽 (upper-lower)/mid
+                - bb_pos: 价格在通道中的相对位置 [0,1]，越大越靠近上轨
+        """
+        bb_mid = data.ewm(span=period, adjust=False).mean()
+        rolling_std = data.rolling(window=period).std()
+        bb_upper = bb_mid + std_mult * rolling_std
+        bb_lower = bb_mid - std_mult * rolling_std
+        band_range = (bb_upper - bb_lower).replace(0, np.nan)
+        bb_pos = (data - bb_lower) / band_range
+        bb_width = (bb_upper - bb_lower) / bb_mid.replace(0, np.nan)
+
+        result = pd.DataFrame(index=data.index)
+        result["bb_mid"] = bb_mid
+        result["bb_upper"] = bb_upper
+        result["bb_lower"] = bb_lower
+        result["bb_width"] = bb_width
+        result["bb_pos"] = bb_pos.clip(lower=0, upper=1)
+        return result
+
+    @staticmethod
+    def rolling_beta(
+        y_ret: pd.Series,
+        x_ret: pd.Series,
+        window: int = 60
+    ) -> pd.Series:
+        """
+        计算滚动 Beta（OLS 斜率）
+
+        Args:
+            y_ret: 目标资产收益率序列
+            x_ret: 基准资产收益率序列
+            window: 滚动窗口，默认 60
+
+        Returns:
+            pd.Series: beta 序列
+        """
+        cov = y_ret.rolling(window=window).cov(x_ret)
+        var = x_ret.rolling(window=window).var()
+        beta = cov / var.replace(0, np.nan)
+        return beta
+
+    @staticmethod
+    def residual_momentum(
+        y_ret: pd.Series,
+        x_ret: pd.Series,
+        beta_window: int = 60
+    ) -> pd.Series:
+        """
+        计算残差动量 RM
+
+        RM_t = y_ret_t - beta_t * x_ret_t
+
+        Args:
+            y_ret: 目标资产收益率
+            x_ret: 基准资产收益率
+            beta_window: beta 滚动窗口，默认 60
+
+        Returns:
+            pd.Series: RM 序列
+        """
+        beta = FactorLibrary.rolling_beta(y_ret, x_ret, window=beta_window)
+        return y_ret - beta * x_ret
+
+    @staticmethod
+    def rolling_zscore(series: pd.Series, window: int = 60) -> pd.Series:
+        """
+        滚动 ZScore 标准化
+
+        Args:
+            series: 原始序列
+            window: 滚动窗口，默认 60
+
+        Returns:
+            pd.Series: ZScore 序列
+        """
+        mean = series.rolling(window=window).mean()
+        std = series.rolling(window=window).std().replace(0, np.nan)
+        z = (series - mean) / std
+        return z.replace([np.inf, -np.inf], np.nan)
+
+    @staticmethod
+    def rolling_slope(series: pd.Series, window: int = 10) -> pd.Series:
+        """
+        计算滚动线性斜率
+
+        Args:
+            series: 原始序列
+            window: 滚动窗口，默认 10
+
+        Returns:
+            pd.Series: 斜率序列
+        """
+        def _slope(values: np.ndarray) -> float:
+            x = np.arange(len(values), dtype=float)
+            if len(values) < 2 or np.all(np.isnan(values)):
+                return np.nan
+            y = np.asarray(values, dtype=float)
+            mask = ~np.isnan(y)
+            if mask.sum() < 2:
+                return np.nan
+            x = x[mask]
+            y = y[mask]
+            x_mean = x.mean()
+            y_mean = y.mean()
+            denominator = ((x - x_mean) ** 2).sum()
+            if denominator == 0:
+                return np.nan
+            return ((x - x_mean) * (y - y_mean)).sum() / denominator
+
+        return series.rolling(window=window).apply(_slope, raw=True)
+
+    @staticmethod
+    def rolling_percentile_rank(series: pd.Series, window: int = 60) -> pd.Series:
+        """
+        计算滚动窗口内“当前值”的分位排名（0~1）
+
+        Args:
+            series: 原始序列
+            window: 滚动窗口，默认 60
+
+        Returns:
+            pd.Series: 分位排名序列
+        """
+        def _rank_last(values: np.ndarray) -> float:
+            if len(values) == 0:
+                return np.nan
+            s = pd.Series(values)
+            last = s.iloc[-1]
+            if pd.isna(last):
+                return np.nan
+            return (s <= last).sum() / len(s)
+
+        return series.rolling(window=window).apply(_rank_last, raw=True)
