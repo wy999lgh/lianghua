@@ -6,7 +6,7 @@
 # ===========================================
 database:
   # 默认数据库类型：postgres / sqlite
-  backend: "postgres"
+  backend: "sqlite"
   # PostgreSQL 连接参数（密码读取顺序：环境变量优先，其次配置文件回退）
   # 生产环境请勿在此填写密码，统一通过 .env 或环境变量注入
   postgres:
