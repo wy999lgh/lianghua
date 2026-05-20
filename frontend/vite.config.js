@@ -18,36 +18,36 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8004',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true
       },
       '/stock-data': {
-        target: 'http://127.0.0.1:8004',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         rewrite: (path) => `/api${path}`
       },
       '/ema-data': {
-        target: 'http://127.0.0.1:8004',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         rewrite: (path) => `/api${path}`
       },
       '/data': {
-        target: 'http://127.0.0.1:8004',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         rewrite: (path) => `/api${path}`
       },
       '/strategies': {
-        target: 'http://127.0.0.1:8004',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         rewrite: (path) => `/api${path}`
       },
       '/backtest': {
-        target: 'http://127.0.0.1:8004',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         rewrite: (path) => `/api${path}`
       },
       '/factors': {
-        target: 'http://127.0.0.1:8004',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         rewrite: (path) => `/api${path}`
       }

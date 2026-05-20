@@ -11,6 +11,7 @@ from api.schemas import (
     BacktestResponse,
     BacktestResult,
     GenericBacktestRequest,
+    DirectBacktestRequest,
 )
 from core.backtest import BacktestEngine
 from core.data.database import get_db
@@ -58,6 +59,10 @@ def run_backtest(request: BacktestRequest):
         )
 
         return _process_backtest_result(result)
+    except ValueError as e:
+        if "未找到数据" in str(e):
+            raise HTTPException(status_code=404, detail=f"标的数据不存在，请选择有效的标的代码")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -89,6 +94,10 @@ def run_generic_backtest(request: GenericBacktestRequest):
         return _process_backtest_result(result)
     except HTTPException:
         raise
+    except ValueError as e:
+        if "未找到数据" in str(e):
+            raise HTTPException(status_code=404, detail=f"标的数据不存在，请选择有效的标的代码")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -139,6 +148,10 @@ def run_backtest_with_config(config_id: int, start_date: Optional[str] = None, e
         return _process_backtest_result(result)
     except HTTPException:
         raise
+    except ValueError as e:
+        if "未找到数据" in str(e):
+            raise HTTPException(status_code=404, detail=f"标的数据不存在，请选择有效的标的代码")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -146,62 +159,36 @@ def run_backtest_with_config(config_id: int, start_date: Optional[str] = None, e
 
 
 @router.post("/backtest/run-direct")
-def run_backtest_direct(
-    strategy_name: Optional[str] = None,
-    strategy_type: str = "grid",
-    symbol: str = "159633",
-    initial_cash: float = 1000000.0,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    base_price: float = 10.0,
-    upper_step: float = 1.0,
-    lower_step: float = 1.0,
-    buy_quantity: int = 100,
-    sell_quantity: int = 100,
-    upper_count: int = 100,
-    lower_count: int = 100,
-    max_position: float = 100000000.0,
-    min_position: float = 0.0,
-    commission_rate: float = 0.0001
-):
+def run_backtest_direct(request: DirectBacktestRequest):
     """直接执行回测（支持页面所有参数）
     
     这是为通用回测页面设计的API，支持直接传递所有参数进行回测。
     
     Args:
-        strategy_name: 策略名称（可选）
-        strategy_type: 策略类型（grid/ma_regime）
-        symbol: 回测标的代码
-        initial_cash: 初始资金
-        start_date: 开始日期（YYYY-MM-DD）
-        end_date: 结束日期（YYYY-MM-DD）
-        base_price: 基准价格（网格策略必需）
-        upper_step: 上涨步长（百分比）
-        lower_step: 下跌步长（百分比）
-        buy_quantity: 买入数量
-        sell_quantity: 卖出数量
-        upper_count: 上涨格数
-        lower_count: 下跌格数
-        max_position: 最大仓位
-        min_position: 最小仓位
-        commission_rate: 佣金率
+        request: 回测请求对象，包含策略类型、标的、日期范围、初始资金和策略参数
     """
     try:
         backtest_engine = BacktestEngine()
         
+        strategy_type = request.strategy_type
+        symbol = request.symbol
+        initial_cash = request.initial_cash
+        start_date = request.start_date
+        end_date = request.end_date
+        
         if strategy_type == "grid":
             grid_config = {
-                'initial_base_price': base_price,
-                'buy_percent': lower_step / 100,
-                'sell_percent': upper_step / 100,
-                'lower_count': lower_count,
-                'upper_count': upper_count,
-                'buy_amount': buy_quantity,
-                'sell_amount': sell_quantity,
-                'max_position': max_position,
-                'min_position': min_position,
+                'initial_base_price': request.base_price,
+                'buy_percent': request.lower_step / 100,
+                'sell_percent': request.upper_step / 100,
+                'lower_count': request.lower_count,
+                'upper_count': request.upper_count,
+                'buy_amount': request.buy_quantity,
+                'sell_amount': request.sell_quantity,
+                'max_position': request.max_position,
+                'min_position': request.min_position,
                 'update_method': 'trigger_price',
-                'commission_rate': commission_rate,
+                'commission_rate': request.commission_rate,
                 'initial_cash': initial_cash,
             }
             
@@ -217,10 +204,10 @@ def run_backtest_direct(
                 start_date=start_date,
                 end_date=end_date,
                 initial_cash=initial_cash,
-                commission_rate=commission_rate,
+                commission_rate=request.commission_rate,
                 ma_regime_period=200,
                 ma_trade_period=60,
-                trade_size=buy_quantity,
+                trade_size=request.buy_quantity,
                 include_bias_check=False
             )
         else:
@@ -229,6 +216,10 @@ def run_backtest_direct(
         return _process_backtest_result(result)
     except HTTPException:
         raise
+    except ValueError as e:
+        if "未找到数据" in str(e):
+            raise HTTPException(status_code=404, detail=f"标的数据不存在，请选择有效的标的代码")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -161,6 +161,27 @@ class BacktestResponse(BaseModel):
     message: str
 
 
+class DirectBacktestRequest(BaseModel):
+    """直接回测请求模型（通用回测页面专用）"""
+    strategy_name: Optional[str] = None
+    strategy_type: str = "grid"
+    symbol: str = "159633"
+    initial_cash: float = 1000000.0
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    frequency: str = "daily"
+    base_price: float = 10.0
+    upper_step: float = 1.0
+    lower_step: float = 1.0
+    buy_quantity: int = 100
+    sell_quantity: int = 100
+    upper_count: int = 100
+    lower_count: int = 100
+    max_position: float = 100000000.0
+    min_position: float = 0.0
+    commission_rate: float = 0.0001
+
+
 class BacktestResult(BaseModel):
     """回测结果模型（包含完整绩效指标）"""
     backtest_id: str

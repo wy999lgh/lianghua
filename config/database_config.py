@@ -62,14 +62,15 @@ def _walk_and_resolve(obj):
 
 @dataclass
 class DatabaseConfig:
-    """数据库配置类 (仅支持 PostgreSQL)"""
-    backend: str = "postgres"
+    """数据库配置类 (支持 PostgreSQL 和 SQLite)"""
+    backend: str = "sqlite"
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_database: str = "postgres"
     postgres_user: str = "postgres"
     postgres_password: str = ""
     postgres_password_env: str = "PGPASSWORD"
+    sqlite_path: str = "data/example_db.sqlite"
     project_root: Path = field(default_factory=_get_project_root)
     
     @classmethod
@@ -81,19 +82,22 @@ class DatabaseConfig:
             config = _load_yaml_config()
         
         db_config = config.get('database', {})
+        backend = db_config.get("backend", "sqlite")
+        
         pg_config: Dict[str, Any] = db_config.get("postgres", {}) or {}
         return cls(
-            backend="postgres",  # 强制使用 postgres
+            backend=backend,
             postgres_host=pg_config.get("host", "localhost"),
             postgres_port=int(pg_config.get("port", 5432)),
             postgres_database=pg_config.get("database", "postgres"),
             postgres_user=pg_config.get("user", "postgres"),
             postgres_password=pg_config.get("password", ""),
             postgres_password_env=pg_config.get("password_env", "PGPASSWORD"),
+            sqlite_path=db_config.get("sqlite", {}).get("path", "data/example_db.sqlite"),
         )
     
     def get_backend(self) -> str:
-        return "postgres"
+        return self.backend
 
     def get_postgres_password(self) -> str:
         """获取 PostgreSQL 密码，优先读取环境变量，其次配置文件（仅作为回退）。"""
@@ -147,6 +151,11 @@ class DatabaseConfig:
             kwargs["password"] = password
         return kwargs
 
+    def get_sqlite_path(self) -> str:
+        """获取SQLite数据库文件路径"""
+        return str(self.project_root / self.sqlite_path)
+
+
 _database_config: Optional[DatabaseConfig] = None
 
 
@@ -168,5 +177,8 @@ if __name__ == "__main__":
     config = get_database_config()
     print(f"Project root: {config.project_root}")
     print(f"Backend: {config.get_backend()}")
-    print(f"Password source: {config.get_postgres_password_source()}")
-    print(f"Postgres Config: {config.get_postgres_connect_kwargs()}")
+    if config.get_backend() == "postgres":
+        print(f"Password source: {config.get_postgres_password_source()}")
+        print(f"Postgres Config: {config.get_postgres_connect_kwargs()}")
+    else:
+        print(f"SQLite Path: {config.get_sqlite_path()}")

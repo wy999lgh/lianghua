@@ -423,7 +423,7 @@ def _sync_instrument_basic_from_db_tables(db: Database, types: list[str]) -> int
             pass
 
     if "index" in wanted and codes_by_type["index"]:
-        conn = db._pg_connect()
+        conn = db._get_connection()
         try:
             cur = conn.cursor()
             cur.execute(
@@ -456,7 +456,7 @@ def _sync_instrument_basic_from_db_tables(db: Database, types: list[str]) -> int
                         )
                         seen.add(("index", scode))
         finally:
-            conn.close()
+            db._release_connection(conn)
 
     for t in wanted:
         for code in sorted(codes_by_type.get(t, set())):

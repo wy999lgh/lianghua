@@ -59,15 +59,19 @@ def fix_strategy_table():
     try:
         from core.data.database import get_db
         db = get_db()
-        conn = db._pg_connect()
+        conn = db._get_connection()
         try:
             cur = conn.cursor()
             
-            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='strategy_configs'")
+            cur.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'strategy_configs'")
+            if not cur.fetchone():
+                return {"status": "success", "updated_count": 0, "message": "策略配置表不存在，无需修复"}
+            
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'strategy_configs'")
             existing_columns = [row[0] for row in cur.fetchall()]
             
             if 'initial_cash' not in existing_columns:
-                cur.execute("ALTER TABLE strategy_configs ADD COLUMN initial_cash NUMERIC(18,2) DEFAULT 1000000.0")
+                cur.execute("ALTER TABLE strategy_configs ADD COLUMN initial_cash DOUBLE PRECISION DEFAULT 1000000.0")
             
             if 'buy_quantity' not in existing_columns:
                 cur.execute("ALTER TABLE strategy_configs ADD COLUMN buy_quantity INTEGER DEFAULT 100")
@@ -89,7 +93,7 @@ def fix_strategy_table():
             conn.commit()
             return {"status": "success", "updated_count": updated_count, "message": "策略配置表结构修复完成"}
         finally:
-            db._pg_release(conn)
+            db._release_connection(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"修复失败: {str(e)}")
 

@@ -2,7 +2,7 @@ import api from './api.js'
 
 export const backtestService = {
   async runDirect(params) {
-    const response = await api.post('/backtest/run-direct', null, { params })
+    const response = await api.post('/backtest/run-direct', params)
     return response.data
   },
 
