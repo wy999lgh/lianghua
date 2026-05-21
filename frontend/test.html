@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>测试页面</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            padding: 50px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container { 
+            background: white; 
+            padding: 30px; 
+            border-radius: 10px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 { color: #333; }
+        .status { 
+            padding: 15px; 
+            margin: 10px 0; 
+            border-radius: 5px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✅ 前端服务测试页面</h1>
+        <div class="status success">
+            <strong>✅ 前端服务运行正常！</strong><br>
+            如果您能看到这个页面，说明Vite开发服务器工作正常。
+        </div>
+        <div class="status info">
+            <strong>📋 接下来：</strong><br>
+            1. 访问 <a href="/">/</a> 查看主应用<br>
+            2. 或者检查浏览器控制台（F12）查看是否有错误<br>
+            3. 检查后端API是否正常（访问 <a href="http://localhost:8000/docs">API文档</a>）
+        </div>
+    </div>
+</body>
+</html>

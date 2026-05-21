@@ -100,16 +100,19 @@
 </template>
 
 <script>
-import { ref, provide } from 'vue'
+console.log('🎯 开始加载 App.vue...')
+
+import { ref, provide, onMounted } from 'vue'
 import { DataAnalysis, TrendCharts, Download, Grid, Setting, Document } from '@element-plus/icons-vue'
 import Backtest from './components/Backtest.vue'
 import StrategyManagement from './components/StrategyManagement.vue'
 import BacktestUniversal from './components/BacktestUniversal.vue'
 import KLineChart from './components/KLineChart.vue'
 import DataManagement from './components/DataManagement.vue'
-
 import FactorManagement from './components/FactorManagement.vue'
 import BacktestHistory from './components/BacktestHistory.vue'
+
+console.log('✅ 所有组件导入成功')
 
 export default {
   name: 'App',
@@ -125,11 +128,12 @@ export default {
     BacktestUniversal,
     KLineChart,
     DataManagement,
-    
     FactorManagement,
     BacktestHistory
   },
   setup() {
+    console.log('🚀 App.vue setup() 执行中...')
+    
     const activeMenu = ref('grid-backtest')
     const currentComponent = ref(Backtest)
     const isCollapsed = ref(false)
@@ -157,13 +161,16 @@ export default {
         'universal-backtest': BacktestUniversal,
         'kline-chart': KLineChart,
         'data-management': DataManagement,
-        
         'factor-management': FactorManagement,
         'backtest-history': BacktestHistory
       }
       activeMenu.value = menuKey
       currentComponent.value = map[menuKey] || Backtest
     }
+
+    onMounted(() => {
+      console.log('✅ App.vue 已挂载！')
+    })
 
     return {
       activeMenu,
@@ -175,12 +182,13 @@ export default {
       BacktestUniversal,
       KLineChart,
       DataManagement,
-      
       FactorManagement,
       BacktestHistory
     }
   }
 }
+
+console.log('🎯 App.vue 定义完成')
 </script>
 
 <style>
